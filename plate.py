@@ -32,6 +32,7 @@ COLORADO = {
     'Z': ['zeal','zipline','zenith','zero'],
 }
 
+# Fallback word list for Windows (used if system dict not found)
 FALLBACK_WORDS = [
     "apple","able","arrow","anchor","amber","angle","agent","above","angry","alive",
     "brave","bright","broad","brown","break","bring","brush","build","blend","black",
@@ -61,15 +62,32 @@ FALLBACK_WORDS = [
 ]
 
 def extract_plate_letters(image_path):
+    """
+    Full pipeline: preprocess the image first, then run EasyOCR on the result.
+    Preprocessing improves OCR accuracy on real-world plate photos.
+    """
+    from preprocess import preprocess_plate
     import easyocr
+
+    # Run our custom preprocessing pipeline before OCR
+    print("Preprocessing image...")
+    processed_path = preprocess_plate(image_path, debug_output=True)
+
     print("Loading OCR model (first run may take a minute)...")
     reader = easyocr.Reader(['en'], gpu=False)
-    results = reader.readtext(image_path)
 
-    # Filter out common plate non-letter text before extracting
+    # Run OCR on the preprocessed image
+    results = reader.readtext(processed_path)
+
+    # Filter low-confidence results and known plate labels
     IGNORE = {'COLORADO', 'COLORFUL', 'COLORFULL', 'USA', 'STATE'}
     raw = ' '.join([text for _, text, conf in results if conf > 0.2 and text.upper() not in IGNORE])
+
+    # Strip everything except letters
     letters = re.sub(r'[^A-Za-z]', '', raw).upper()
+
+    # Also strip state name if OCR merged it into one blob
+    letters = re.sub(r'COLORADO|COLORFUL', '', letters)
 
     if len(letters) < 2:
         raise ValueError("Could not read any letters from the image. Try a clearer photo.")
@@ -77,6 +95,7 @@ def extract_plate_letters(image_path):
     return letters[:7]
 
 def load_words():
+    """Load word list from system dict (Linux/Mac) or fallback list (Windows)."""
     by_letter = {}
     if os.path.isfile(WORDLIST):
         with open(WORDLIST) as f:
@@ -88,6 +107,7 @@ def load_words():
     return by_letter
 
 def pick_word(letter, dict_words, used):
+    """Pick a Colorado-themed word for the given letter, falling back to general dict."""
     co_words = COLORADO.get(letter.upper(), [])
     random.shuffle(co_words)
     for w in co_words:
@@ -101,6 +121,7 @@ def pick_word(letter, dict_words, used):
     return letter + "..."
 
 def make_acronym(letters, dict_words):
+    """Generate one acronym phrase from the given letters."""
     used = set()
     words = []
     for letter in letters:
@@ -110,6 +131,7 @@ def make_acronym(letters, dict_words):
     return ' '.join(words)
 
 def highlight(phrase):
+    """Bold and green the first letter of each word for readability."""
     bold_green = '\033[1;32m'
     reset = '\033[0m'
     words = phrase.split()
@@ -127,7 +149,7 @@ def main():
     if os.path.isfile(arg):
         ext = os.path.splitext(arg)[1].lower()
         if ext in ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'):
-            print(f"\n\033[1m Reading plate from image...\033[0m")
+            print(f"\n\033[1m📷 Reading plate from image...\033[0m")
             try:
                 letters = extract_plate_letters(arg)
                 print(f"\033[90mDetected letters: {letters}\033[0m")
@@ -138,13 +160,14 @@ def main():
             print(f"Unsupported file type: {ext}")
             sys.exit(1)
     else:
+        # Manual letter input
         letters = re.sub(r'[^A-Za-z]', '', arg).upper()
 
     if len(letters) < 2:
         print("Need at least 2 letters.")
         sys.exit(1)
 
-    print(f"\n\033[1m  Colorado Plate: {'-'.join(letters)}\033[0m\n")
+    print(f"\n\033[1m🏔️  Colorado Plate: {'-'.join(letters)}\033[0m\n")
 
     dict_words = load_words()
 
